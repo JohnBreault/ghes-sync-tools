@@ -1,0 +1,41 @@
+name: CodeQL Action Sync Tool
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch: # Allows manual triggering of the workflow
+
+jobs:
+  sync:
+    runs-on: Ent_Linux_runners
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download codeql-action-sync tool
+        run: |
+          # fetch the latest version number
+          VERSION=$(curl -s https://api.github.com/repos/github/codeql-action-sync-tool/releases/latest | jq -r '.tag_name')
+          echo "latest vesion number is v${VERSION}"
+
+          # download the tool
+          curl -L -o codeql-action-sync.tar.gz "https://github.com/github/codeql-action-sync-tool/releases/download/${VERSION}/codeql-action-sync_${VERSION}_linux_amd64.tar.gz"
+          tar -xzf codeql-action-sync.tar.gz
+          mkdir ./cache
+
+      - name: Download CodeQL-Action bundle and assets
+        run: |
+          ./codeql-action-sync pull --cache-dir ./cache
+
+      - name: Remove OSX and .tar.gz release assets 
+        run: |
+           # Removes OSX assets to minimize load on GHES. Change as needed for your environment
+           rm -f ./cache/releases/codeql-bundle-*/assets/*osx*
+
+           # Removes .tar.gz assets in favor of .tar.zst assets to minimize load on GHES. Change as needed for your environment
+           rm -f ./cache/releases/codeql-bundle-*/assets/*.tar.gz
+
+      - name: Sync assets to GHES
+        run: |
+           ./codeql-action-sync push --cache-dir ./cache --destination-url https://code.flankspeed.us.navy.mil --destination-token ${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}
+ 
