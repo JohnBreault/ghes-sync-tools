@@ -27,13 +27,32 @@ jobs:
         run: |
           ./codeql-action-sync pull --cache-dir ./cache
 
-      - name: Remove OSX and .tar.gz release assets 
+      - name: Remove unnecessary release assets
         run: |
-           # Removes OSX assets to minimize load on GHES. Change as needed for your environment
-           rm -f ./cache/releases/codeql-bundle-*/assets/*osx*
-
-           # Removes .tar.gz assets in favor of .tar.zst assets to minimize load on GHES. Change as needed for your environment
-           rm -f ./cache/releases/codeql-bundle-*/assets/*.tar.gz
+           # Whitelist approach: keep only assets needed for Linux and Windows runners.
+           # Removes macOS, universal bundles, and .tar.gz bundle variants.
+           # Change the keep patterns as needed for your environment.
+           for dir in ./cache/releases/codeql-bundle-*/assets; do
+             [ -d "$dir" ] || continue
+             echo "=== $(basename "$(dirname "$dir")") ==="
+             for file in "$dir"/*; do
+               [ -f "$file" ] || continue
+               name=$(basename "$file")
+               keep=false
+               case "$name" in
+                 *linux*.tar.zst|*win*.tar.zst)                       keep=true ;; # platform bundles
+                 *linux*.tar.zst.checksum.txt|*win*.tar.zst.checksum.txt) keep=true ;; # checksums
+                 update-job-proxy-linux*|update-job-proxy-win*)       keep=true ;; # Dependabot/auto-fix proxy
+                 cli-version-*.txt)                                   keep=true ;; # CLI version metadata
+               esac
+               if $keep; then
+                 echo "  Keeping:  $name"
+               else
+                 echo "  Removing: $name"
+                 rm -f "$file"
+               fi
+             done
+           done
 
       - name: Sync assets to GHES
         run: |
