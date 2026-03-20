@@ -1,0 +1,39 @@
+name: Actions Sync Tool
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 6'
+
+jobs:
+  actions-org:
+    runs-on: linux
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: setup
+        run: |
+          # Fetch the version (e.g. "v1.2.3")
+          VERSION=$(curl -s https://api.github.com/repos/actions/actions-sync/releases/latest | jq -r .tag_name)
+          # Remove a leading "v" (if present)
+          VERSION=${VERSION#v}
+          echo "Latest version number v$VERSION"
+          # Download the latest Linux AMD64 version of the actions-sync tool
+          echo  "url=https://github.com/actions/actions-sync/releases/download/v${VERSION}/actions.actions-sync_${VERSION}_linux_amd64.tar.gz"
+          curl -L -O "https://github.com/actions/actions-sync/releases/download/v${VERSION}/actions.actions-sync_${VERSION}_linux_amd64.tar.gz"
+          tar -xvzf actions.actions-sync_${VERSION}_linux_amd64.tar.gz
+      - name: sync
+        run: |
+          mkdir -p cache
+          # can't sync actions/cache, actions/upload-release-asset as it has "been retired and cannot be reused"
+          ./bin/actions-sync sync \
+            --cache-dir "cache" \
+            --destination-token "${{ secrets.ACTIONS_SYNC }}" \
+            --destination-url "${{ vars.GHES_URL }}" \
+            --repo-name-list-file "repo-name-list.txt"
+      - name: cleanup
+        run: |
+          ls -la ./
+          rm -rfv ./* || true
+          rm -rfv ./.??* || true
+          ls -la ./

@@ -1,0 +1,41 @@
+name: Actions Sync Tool (Windows)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 6'
+
+jobs:
+  actions-org:
+    runs-on: windows-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: setup
+        shell: pwsh
+        run: |
+          # Fetch the version (e.g. "v1.2.3")
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/actions/actions-sync/releases/latest"
+          $VERSION = $release.tag_name -replace '^v', ''
+          Write-Output "Latest version number v$VERSION"
+          # Download the latest Windows AMD64 version of the actions-sync tool
+          $url = "https://github.com/actions/actions-sync/releases/download/v${VERSION}/actions.actions-sync_${VERSION}_windows_amd64.zip"
+          Write-Output "url=$url"
+          Invoke-WebRequest -Uri $url -OutFile "actions-sync.zip"
+          Expand-Archive -Path "actions-sync.zip" -DestinationPath "."
+      - name: sync
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "cache"
+          # can't sync actions/cache, actions/upload-release-asset as it has "been retired and cannot be reused"
+          .\bin\actions-sync.exe sync `
+            --cache-dir "cache" `
+            --destination-token "${{ secrets.ACTIONS_SYNC }}" `
+            --destination-url "${{ vars.GHES_URL }}" `
+            --repo-name-list-file "repo-name-list.txt"
+      - name: cleanup
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path .
+          Remove-Item -Path .\* -Recurse -Force -ErrorAction SilentlyContinue
+          Get-ChildItem -Path .
