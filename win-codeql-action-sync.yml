@@ -31,16 +31,31 @@ jobs:
         run: |
           .\codeql-action-sync.exe pull --cache-dir .\cache
 
-      - name: Remove OSX and .tar.gz release assets
+      - name: Remove unnecessary release assets
         shell: pwsh
         run: |
-          # Removes OSX assets to minimize load on GHES. Change as needed for your environment
-          Get-ChildItem -Path ".\cache\releases\codeql-bundle-*\assets\*osx*" -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-
-          # Removes .tar.gz assets in favor of .tar.zst assets to minimize load on GHES. Change as needed for your environment
-          Get-ChildItem -Path ".\cache\releases\codeql-bundle-*\assets\*.tar.gz" -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
+          # Whitelist approach: keep only assets needed for Linux and Windows runners.
+          # Removes macOS, universal bundles, and .tar.gz bundle variants.
+          # Change the keep patterns as needed for your environment.
+          $assetDirs = Get-ChildItem -Path ".\cache\releases\codeql-bundle-*\assets" -Directory -ErrorAction SilentlyContinue
+          foreach ($dir in $assetDirs) {
+              Write-Host "=== $($dir.Parent.Name) ==="
+              foreach ($file in (Get-ChildItem -Path $dir.FullName -File -ErrorAction SilentlyContinue)) {
+                  $keep = switch -Wildcard ($file.Name) {
+                      {$_ -like '*linux*.tar.zst' -or $_ -like '*win*.tar.zst'}                                 { $true; break } # platform bundles
+                      {$_ -like '*linux*.tar.zst.checksum.txt' -or $_ -like '*win*.tar.zst.checksum.txt'}       { $true; break } # checksums
+                      {$_ -like 'update-job-proxy-linux*' -or $_ -like 'update-job-proxy-win*'}                 { $true; break } # Dependabot/auto-fix proxy
+                      {$_ -like 'cli-version-*.txt'}                                                             { $true; break } # CLI version metadata
+                      default                                                                                     { $false }
+                  }
+                  if ($keep) {
+                      Write-Host "  Keeping:  $($file.Name)"
+                  } else {
+                      Write-Host "  Removing: $($file.Name)"
+                      Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
+                  }
+              }
+          }
 
       - name: Sync assets to GHES
         shell: pwsh
