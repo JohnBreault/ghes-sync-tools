@@ -60,4 +60,4 @@ jobs:
       - name: Sync assets to GHES
         shell: pwsh
         run: |
-          .\codeql-action-sync.exe push --cache-dir .\cache --destination-url https://code.flankspeed.us.navy.mil --destination-token "${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}"
+          .\codeql-action-sync.exe push --cache-dir .\cache --destination-url ${{ vars.GHES_URL }} --destination-token "${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}"
