@@ -57,4 +57,30 @@ jobs:
       - name: Sync assets to GHES
         run: |
            ./codeql-action-sync push --force --cache-dir ./cache --destination-url ${{ vars.GHES_URL }} --destination-token ${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}
+
+      - name: Mark latest release on GHES
+        run: |
+          # The sync tool can recreate releases out of order, causing an older
+          # version to be stamped as "latest." Fix this by querying github.com
+          # for the true latest release and flagging it on GHES.
+          GHES_API="${{ vars.GHES_URL }}/api/v3"
+          TOKEN="${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}"
+          REPO="github/codeql-action"
+
+          LATEST_TAG=$(curl -sf https://api.github.com/repos/${REPO}/releases/latest | jq -r '.tag_name')
+          echo "Latest release on github.com: ${LATEST_TAG}"
+
+          RELEASE_ID=$(curl -sf -H "Authorization: token ${TOKEN}" \
+            "${GHES_API}/repos/${REPO}/releases/tags/${LATEST_TAG}" | jq -r '.id')
+
+          if [ -n "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
+            curl -sf -X PATCH \
+              -H "Authorization: token ${TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d '{"make_latest":"true"}' \
+              "${GHES_API}/repos/${REPO}/releases/${RELEASE_ID}" > /dev/null
+            echo "Marked ${LATEST_TAG} (release ${RELEASE_ID}) as latest on GHES"
+          else
+            echo "::warning::Could not find release ${LATEST_TAG} on GHES"
+          fi
  
