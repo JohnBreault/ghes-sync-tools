@@ -19,10 +19,10 @@ jobs:
           $VERSION = $release.tag_name -replace '^v', ''
           Write-Output "Latest version number v$VERSION"
           # Download the latest Windows AMD64 version of the actions-sync tool
-          $url = "https://github.com/actions/actions-sync/releases/download/v${VERSION}/actions.actions-sync_${VERSION}_windows_amd64.zip"
+          $url = "https://github.com/actions/actions-sync/releases/download/v${VERSION}/actions.actions-sync_${VERSION}_windows_amd64.tar.gz"
           Write-Output "url=$url"
-          Invoke-WebRequest -Uri $url -OutFile "actions-sync.zip"
-          Expand-Archive -Path "actions-sync.zip" -DestinationPath "."
+          Invoke-WebRequest -Uri $url -OutFile "actions-sync.tar.gz"
+          tar -xzf actions-sync.tar.gz
       - name: sync
         shell: pwsh
         run: |
