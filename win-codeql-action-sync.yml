@@ -66,28 +66,28 @@ jobs:
         shell: pwsh
         run: |
           # The sync tool can recreate releases out of order, causing an older
-          # version to be stamped as "latest." Fix this by querying github.com
-          # for the true latest release and flagging it on GHES.
+          # version to be stamped as "latest." Query GHES directly for its
+          # codeql-bundle releases and mark the highest semver as latest.
           $ghesApi = "${{ vars.GHES_URL }}/api/v3"
           $token   = "${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}"
           $repo    = "github/codeql-action"
           $headers = @{ Authorization = "token $token" }
 
-          $latest    = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
-          $latestTag = $latest.tag_name
-          Write-Host "Latest release on github.com: $latestTag"
+          $releases = Invoke-RestMethod -Uri "$ghesApi/repos/$repo/releases?per_page=100" -Headers $headers
 
-          try {
-              $ghesRelease = Invoke-RestMethod -Uri "$ghesApi/repos/$repo/releases/tags/$latestTag" -Headers $headers
-              $releaseId   = $ghesRelease.id
+          $best = $releases |
+              Where-Object { $_.tag_name -match '^codeql-bundle-v\d' -and -not $_.draft -and -not $_.prerelease } |
+              Sort-Object { [version]($_.tag_name -replace '^codeql-bundle-v', '') } |
+              Select-Object -Last 1
 
-              Invoke-RestMethod -Uri "$ghesApi/repos/$repo/releases/$releaseId" `
+          if ($best) {
+              Invoke-RestMethod -Uri "$ghesApi/repos/$repo/releases/$($best.id)" `
                   -Method Patch -Headers $headers `
                   -ContentType "application/json" `
                   -Body '{"make_latest":"true"}' | Out-Null
 
-              Write-Host "Marked $latestTag (release $releaseId) as latest on GHES"
+              Write-Host "Marked $($best.tag_name) (release $($best.id)) as latest on GHES"
           }
-          catch {
-              Write-Host "::warning::Could not find release $latestTag on GHES: $_"
+          else {
+              Write-Host "::warning::No codeql-bundle releases found on GHES"
           }

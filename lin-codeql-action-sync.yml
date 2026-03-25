@@ -61,17 +61,20 @@ jobs:
       - name: Mark latest release on GHES
         run: |
           # The sync tool can recreate releases out of order, causing an older
-          # version to be stamped as "latest." Fix this by querying github.com
-          # for the true latest release and flagging it on GHES.
+          # version to be stamped as "latest." Query GHES directly for its
+          # codeql-bundle releases and mark the highest semver as latest.
           GHES_API="${{ vars.GHES_URL }}/api/v3"
           TOKEN="${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}"
           REPO="github/codeql-action"
 
-          LATEST_TAG=$(curl -sf https://api.github.com/repos/${REPO}/releases/latest | jq -r '.tag_name')
-          echo "Latest release on github.com: ${LATEST_TAG}"
+          BEST=$(curl -sf -H "Authorization: token ${TOKEN}" \
+            "${GHES_API}/repos/${REPO}/releases?per_page=100" | \
+            jq '[.[] | select(.tag_name | test("^codeql-bundle-v[0-9]")) | select(.draft | not) | select(.prerelease | not)] |
+                sort_by(.tag_name | ltrimstr("codeql-bundle-v") | split(".") | map(tonumber)) |
+                last')
 
-          RELEASE_ID=$(curl -sf -H "Authorization: token ${TOKEN}" \
-            "${GHES_API}/repos/${REPO}/releases/tags/${LATEST_TAG}" | jq -r '.id')
+          RELEASE_ID=$(echo "$BEST" | jq -r '.id')
+          TAG=$(echo "$BEST" | jq -r '.tag_name')
 
           if [ -n "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
             curl -sf -X PATCH \
@@ -79,8 +82,8 @@ jobs:
               -H "Content-Type: application/json" \
               -d '{"make_latest":"true"}' \
               "${GHES_API}/repos/${REPO}/releases/${RELEASE_ID}" > /dev/null
-            echo "Marked ${LATEST_TAG} (release ${RELEASE_ID}) as latest on GHES"
+            echo "Marked ${TAG} (release ${RELEASE_ID}) as latest on GHES"
           else
-            echo "::warning::Could not find release ${LATEST_TAG} on GHES"
+            echo "::warning::No codeql-bundle releases found on GHES"
           fi
  
