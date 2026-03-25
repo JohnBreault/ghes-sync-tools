@@ -7,7 +7,7 @@ on:
 
 jobs:
   actions-org:
-    runs-on: windows-latest
+    runs-on: Windows
     steps:
       - name: checkout
         uses: actions/checkout@v4
