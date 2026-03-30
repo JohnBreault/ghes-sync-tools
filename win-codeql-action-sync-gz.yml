@@ -1,0 +1,93 @@
+name: CodeQL Action Sync Tool
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch: # Allows manual triggering of the workflow
+
+jobs:
+  sync:
+    runs-on: Ent_Windows_runners
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download codeql-action-sync tool
+        shell: pwsh
+        run: |
+          # fetch the latest version number
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/github/codeql-action-sync-tool/releases/latest"
+          $VERSION = $release.tag_name
+          Write-Host "latest vesion number is v${VERSION}"
+
+          # download the tool
+          $downloadUrl = "https://github.com/github/codeql-action-sync-tool/releases/download/${VERSION}/codeql-action-sync_${VERSION}_windows_amd64.tar.gz"
+          Invoke-WebRequest -Uri $downloadUrl -OutFile "codeql-action-sync.tar.gz"
+          tar -xzf codeql-action-sync.tar.gz
+          New-Item -Path ".\cache" -ItemType Directory -Force | Out-Null
+
+      - name: Download CodeQL-Action bundle and assets
+        shell: pwsh
+        run: |
+          .\codeql-action-sync.exe pull --cache-dir .\cache
+
+      - name: Remove unnecessary release assets
+        shell: pwsh
+        run: |
+          # Whitelist approach: keep only assets needed for Linux and Windows runners.
+          # Removes macOS, universal bundles, and .tar.zst bundle variants.
+          # Change the keep patterns as needed for your environment.
+          $assetDirs = Get-ChildItem -Path ".\cache\releases\codeql-bundle-*\assets" -Directory -ErrorAction SilentlyContinue
+          foreach ($dir in $assetDirs) {
+              Write-Host "=== $($dir.Parent.Name) ==="
+              foreach ($file in (Get-ChildItem -Path $dir.FullName -File -ErrorAction SilentlyContinue)) {
+                  $keep = switch -Wildcard ($file.Name) {
+                      {$_ -like '*linux*.tar.gz' -or $_ -like '*win*.tar.gz'}                               { $true; break } # platform bundles
+                      {$_ -like '*linux*.tar.gz.checksum.txt' -or $_ -like '*win*.tar.gz.checksum.txt'}     { $true; break } # checksums
+                      {$_ -like 'update-job-proxy-linux*' -or $_ -like 'update-job-proxy-win*'}                 { $true; break } # Dependabot/auto-fix proxy
+                      {$_ -like 'cli-version-*.txt'}                                                             { $true; break } # CLI version metadata
+                      default                                                                                     { $false }
+                  }
+                  if ($keep) {
+                      Write-Host "  Keeping:  $($file.Name)"
+                  } else {
+                      Write-Host "  Removing: $($file.Name)"
+                      Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
+                  }
+              }
+          }
+
+      - name: Sync assets to GHES
+        shell: pwsh
+        run: |
+          .\codeql-action-sync.exe push --force --cache-dir .\cache --destination-url ${{ vars.GHES_URL }} --destination-token "${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}"
+
+      - name: Mark latest release on GHES
+        shell: pwsh
+        run: |
+          # The sync tool can recreate releases out of order, causing an older
+          # version to be stamped as "latest." Fix this by querying github.com
+          # for the true latest release and flagging it on GHES.
+          $ghesApi = "${{ vars.GHES_URL }}/api/v3"
+          $token   = "${{ secrets.CODEQL_ACTION_SYNC_TOKEN }}"
+          $repo    = "github/codeql-action"
+          $headers = @{ Authorization = "token $token" }
+
+          $latest    = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
+          $latestTag = $latest.tag_name
+          Write-Host "Latest release on github.com: $latestTag"
+
+          try {
+              $ghesRelease = Invoke-RestMethod -Uri "$ghesApi/repos/$repo/releases/tags/$latestTag" -Headers $headers
+              $releaseId   = $ghesRelease.id
+
+              Invoke-RestMethod -Uri "$ghesApi/repos/$repo/releases/$releaseId" `
+                  -Method Patch -Headers $headers `
+                  -ContentType "application/json" `
+                  -Body '{"make_latest":"true"}' | Out-Null
+
+              Write-Host "Marked $latestTag (release $releaseId) as latest on GHES"
+          }
+          catch {
+              Write-Host "::warning::Could not find release $latestTag on GHES: $_"
+          }
